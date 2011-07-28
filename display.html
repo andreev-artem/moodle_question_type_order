@@ -2,10 +2,6 @@
   <?php echo $questiontext; ?>
 </div>
 
-<?php if ($image) { ?>
-  <img class="qimage" src="<?php echo $image; ?>" alt="" />
-<?php } ?>
-
 <div id="q<?php echo $question->id ?>answer" class="ablock clearfix">
 
 <?php if (!$fallbackonly) { ?>
@@ -60,9 +56,6 @@ ul.appendChild(li);
 
 <?php } ?>
 
-var divclearer = document.createElement("div");
-Dom.addClass(divclearer, "clearer");
-ul.appendChild(divclearer);
 answerdiv.appendChild(ul);
 
 input = createElementWithNameandType("input", "<?php echo $defaultresponsename ?>", "checkbox");
@@ -88,15 +81,16 @@ else {
 ddOrderingInit(<?php echo $liarraystring ?>, "q<?php echo $question->id ?>");
 <?php } ?>
 
-}
-
-YAHOO.util.Event.onDOMReady(insertQuestion<?php echo $question->id ?>);
-
 <?php
 foreach ($jsinit as $jsinitline) {
     echo $jsinitline."\n";
 }
 ?>
+
+}
+
+YAHOO.util.Event.onDOMReady(insertQuestion<?php echo $question->id ?>);
+
 //]]>
 </script>
 <noscript>

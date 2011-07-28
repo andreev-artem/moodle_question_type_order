@@ -13,6 +13,7 @@ ul.draglist li {
     cursor: move;
     background-color: white;
     border:1px solid black;
+    list-style: none;
 }
 
 ul.deactivateddraglist {
@@ -31,11 +32,13 @@ ul.deactivateddraglist li {
     cursor: default;
     background-color: lightgray;
     border:1px solid gray;
+    list-style: none;
 }
 
 
-ul.inline li {
-    float:left;
+ul.inline li, ul.inline p {
+    display: inline;
+    line-height: 5ex;
 }
 
 ul.readonly li {

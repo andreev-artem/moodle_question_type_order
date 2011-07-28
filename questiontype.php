@@ -26,17 +26,20 @@ class question_order_qtype extends default_questiontype {
     }
 
     function get_question_options(&$question) {
-        $question->options = get_record('question_order', 'question', $question->id);
-        $question->options->subquestions = get_records('question_order_sub', 'question', $question->id, 'id ASC');
+        global $DB;
+        $question->options = $DB->get_record('question_order', array('question' => $question->id));
+        $question->options->subquestions = $DB->get_records('question_order_sub', array('question' => $question->id), 'id ASC');
+
         return true;
     }
 
     function save_question_options($question) {
+        global $DB;
+        $context = $question->context;
         $result = new stdClass;
 
-        if (!$oldsubquestions = get_records("question_order_sub", "question", $question->id, "id ASC")) {
-            $oldsubquestions = array();
-        }
+        $oldsubquestions = $DB->get_records('question_order_sub',
+                        array('question' => $question->id), 'id ASC');
 
         // $subquestions will be an array with subquestion ids
         $subquestions = array();
@@ -45,61 +48,53 @@ class question_order_qtype extends default_questiontype {
 
         // Insert all the new question+answer pairs
         foreach ($question->subquestions as $key => $questiontext) {
-            $answertext = $question->subanswers[$key];
-            if (!empty($questiontext)) {
-                if ($subquestion = array_shift($oldsubquestions)) {  // Existing answer, so reuse it
-                    $subquestion->questiontext = $questiontext;
-                    $subquestion->answertext   = $answertext;
-                    if (!update_record("question_order_sub", $subquestion)) {
-                        $result->error = "Could not insert order subquestion! (id=$subquestion->id)";
-                        return $result;
-                    }
-                    $ordercount += 1;
-                } else {
-                    $subquestion = new stdClass;
-                    // Determine a unique random code
-                    $subquestion->code = rand(1,999999999);
-                    while (record_exists('question_order_sub', 'code', $subquestion->code, 'question', $question->id)) {
-                        $subquestion->code = rand();
-                    }
-
-                    $subquestion->question = $question->id;
-                    $subquestion->questiontext = $questiontext;
-                    $subquestion->answertext   = $ordercount;
-                    $ordercount += 1;
-
-                    if (!$subquestion->id = insert_record("question_order_sub", $subquestion)) {
-                        $result->error = "Could not insert order subquestion!";
-                        return $result;
-                    }
-                }
-                $subquestions[] = $subquestion->id;
+            if ($questiontext['text'] == '') {
+                continue;
             }
+
+            // Update an existing subquestion if possible.
+            $subquestion = array_shift($oldsubquestions);
+            if (!$subquestion) {
+                $subquestion = new stdClass;
+                // Determine a unique random code
+                $subquestion->code = rand(1,999999999);
+                while ($DB->record_exists('question_order_sub', array('code' => $subquestion->code, 'question' => $question->id))) {
+                    $subquestion->code = rand(1,999999999);
+                }
+
+                $subquestion->question = $question->id;
+                $subquestion->questiontext = '';
+                $subquestion->answertext = '';
+
+                $subquestion->id = $DB->insert_record("question_order_sub", $subquestion);
+            }
+
+            $subquestion->questiontext = $this->import_or_save_files($questiontext,
+                                $context, 'qtype_order', 'subquestion', $subquestion->id);
+            $subquestion->questiontextformat = $questiontext['format'];
+            $subquestion->answertext   = $ordercount;
+            $DB->update_record("question_order_sub", $subquestion);
+            $ordercount += 1;
+            $subquestions[] = $subquestion->id;
         }
 
         // delete old subquestions records
-        if (!empty($oldsubquestions)) {
-            foreach($oldsubquestions as $os) {
-                delete_records('question_order_sub', 'id', $os->id);
-            }
+        $fs = get_file_storage();
+        foreach($oldsubquestions as $oldsub) {
+            $fs->delete_area_files($context->id, 'qtype_order', 'subquestion', $oldsub->id);
+            $DB->delete_records('question_order_sub', array('id' => $oldsub->id));
         }
 
-        if ($options = get_record("question_order", "question", $question->id)) {
+        if ($options = $DB->get_record("question_order", array("question" => $question->id))) {
             $options->subquestions = implode(",",$subquestions);
             $options->horizontal = $question->horizontal;
-            if (!update_record("question_order", $options)) {
-                $result->error = "Could not update order options! (id=$options->id)";
-                return $result;
-            }
+            $DB->update_record("question_order", $options);
         } else {
             unset($options);
             $options->question = $question->id;
             $options->subquestions = implode(",",$subquestions);
             $options->horizontal = $question->horizontal;
-            if (!insert_record("question_order", $options)) {
-                $result->error = "Could not insert order options!";
-                return $result;
-            }
+            $DB->insert_record("question_order", $options);
         }
 
         if (!empty($result->notice)) {
@@ -117,18 +112,23 @@ class question_order_qtype extends default_questiontype {
     /**
     * Deletes question from the question-type specific tables
     *
-    * @return boolean Success/Failure
     * @param integer $question->id
+    * @param integer $question->context
     */
-    function delete_question($questionid) {
-        delete_records("question_order", "question", $questionid);
-        delete_records("question_order_sub", "question", $questionid);
-        return true;
+    function delete_question($questionid, $contextid) {
+        global $DB;
+
+        $DB->delete_records("question_order", array("question" => $questionid));
+        $DB->delete_records("question_order_sub", array("question" => $questionid));
+
+        parent::delete_question($questionid, $contextid);
     }
 
     function create_session_and_responses(&$question, &$state, $cmoptions, $attempt) {
-        if (!$subquestions = get_records('question_order_sub', 'question', $question->id, 'id ASC')) {
-            notify('Error: Missing subquestions!');
+        global $DB, $OUTPUT;
+
+        if (!$subquestions = $DB->get_records('question_order_sub', array('question' => $question->id), 'id ASC')) {
+            echo $OUTPUT->notification('Error: Missing subquestions!');
             return false;
         }
 
@@ -195,6 +195,15 @@ class question_order_qtype extends default_questiontype {
     }
 
     function restore_session_and_responses(&$question, &$state) {
+        global $DB, $OUTPUT;
+        static $subquestions = array();
+        if (!isset($subquestions[$question->id])){
+            if (!$subquestions[$question->id] = $DB->get_records('question_order_sub', array('question' => $question->id), 'id ASC')) {
+               echo $OUTPUT->notification('Error: Missing subquestions!');
+               return false;
+            }
+        }
+
         // The serialized format for ordering questions is a comma separated
         // list of question answer pairs (e.g. 1-1,2-3,3-2), where the ids of
         // both refer to the id in the table question_order_sub.
@@ -206,8 +215,8 @@ class question_order_qtype extends default_questiontype {
         $responses = array_map(create_function('$val',
          'return explode("-", $val);'), $responses);
 
-        if (!$subquestionsbyid = get_records('question_order_sub', 'question', $question->id, 'id ASC')) {
-            notify('Error: Missing subquestions!');
+        if (!$subquestionsbyid = $DB->get_records('question_order_sub', array('question' => $question->id), 'id ASC')) {
+            echo $OUTPUT->notification('Error: Missing subquestions!');
             return false;
         }
 
@@ -243,6 +252,8 @@ class question_order_qtype extends default_questiontype {
     }
 
     function save_session_and_responses(&$question, &$state) {
+        global $DB;
+
         $subquestions = &$state->options->subquestions;
         $responses = &$state->options->responses;
 
@@ -272,7 +283,7 @@ class question_order_qtype extends default_questiontype {
         $responses = implode(',', $responses);
 
         // Set the legacy answer field
-        if (!set_field('question_states', 'answer', $responses, 'id', $state->id)) {
+        if (!$DB->set_field('question_states', 'answer', $responses, array('id' => $state->id))) {
             return false;
         }
         return true;
@@ -396,12 +407,14 @@ class question_order_qtype extends default_questiontype {
      * integer array keys, which have no significance.
      */
     function get_html_head_contributions(&$question, &$state) {
+        global $PAGE;
+
         // Load YUI libraries
-        require_js("yui_yahoo");
-        require_js("yui_event");
-        require_js("yui_dom");
-        require_js("yui_dragdrop");
-        require_js("yui_animation");
+        $PAGE->requires->yui2_lib('yahoo');
+        $PAGE->requires->yui2_lib('event');
+        $PAGE->requires->yui2_lib('dom');
+        $PAGE->requires->yui2_lib('dragdrop');
+        $PAGE->requires->yui2_lib('animation');
 
         $contributions = parent::get_html_head_contributions($question, $state);
 
@@ -409,8 +422,10 @@ class question_order_qtype extends default_questiontype {
     }
 
     function print_question_formulation_and_controls(&$question, &$state, $cmoptions, $options) {
-        global $CFG;
+        global $CFG, $USER;
+        $context        = $this->get_context_by_category_id($question->category);
         $subquestions   = $state->options->subquestions;
+        $correctanswers = $this->get_correct_responses($question, $state);
         $nameprefix     = $question->name_prefix;
         $answers        = array();
         $responses      = &$state->responses;
@@ -431,16 +446,6 @@ class question_order_qtype extends default_questiontype {
 
         // Check to see if the defaultresponse option has changed from the previous
         // submission
-        /*if (isset($responses['defaultresponse'])) {
-            $state->options->defaultresponse = $responses['defaultresponse'];
-        }
-        // If it's not set at all, default is no
-        else if (!isset($state->options->defaultresponse)) {
-            $state->options->defaultresponse = "no";
-        }*/
-
-
-
         if (isset($responses['defaultresponse']) and $responses['defaultresponse'] == 'on') {
             $state->options->defaultresponse = 'yes';
         }
@@ -469,7 +474,6 @@ class question_order_qtype extends default_questiontype {
         // Generate question intro for both versions
         $questiontext = $this->format_text($question->questiontext,
                 $question->questiontextformat, $cmoptions);
-        $image = get_question_image($question);
 
         ////////////////////////////////
         // Generate fallback version
@@ -488,8 +492,8 @@ class question_order_qtype extends default_questiontype {
             if ($subquestion->questiontext) {
                 // Subquestion text:
                 $a = new stdClass;
-                $a->text = $this->format_text($subquestion->questiontext,
-                        $question->questiontextformat, $cmoptions);
+                $text = quiz_rewrite_question_urls($subquestion->questiontext, 'pluginfile.php', $context->id, 'qtype_order', 'subquestion', array($state->attempt, $state->question), $subquestion->id);
+                $a->text = $this->format_text($text, $subquestion->questiontextformat, $cmoptions);
 
                 // Drop-down list:
                 $menuname = $nameprefix.$subquestion->code;
@@ -512,9 +516,9 @@ class question_order_qtype extends default_questiontype {
                     }
                 }
 
-                $a->control = choose_from_menu($answers, $menuname, $response, 'choose',
-                                               '', 0, true, $options->readonly);
-
+                $attributes = array();
+                $attributes['disabled'] = $options->readonly ? 'disabled' : null;
+                $a->control = html_writer::select($answers, $menuname, $response, array(''=>'choosedots'), $attributes);
                 $anss[] = $a;
             }
         }
@@ -528,10 +532,8 @@ class question_order_qtype extends default_questiontype {
         $liname = 'li'.$question->id;
         $defaultresponsename = $nameprefix.'defaultresponse';
 
-
-
         if ($state->options->defaultresponse == 'yes') {
-            $ulclass .= 'deactivateddraglist';
+            $ulclass = 'deactivateddraglist';
         }
         else {
             $ulclass = 'draglist';
@@ -632,7 +634,8 @@ class question_order_qtype extends default_questiontype {
 
             if ($subquestion->questiontext) {
                 // Clean up text and replace " with \\" for use in javascript
-                $subquestiontext = $this->format_text($subquestion->questiontext,
+                $text = quiz_rewrite_question_urls($subquestion->questiontext, 'pluginfile.php', $context->id, 'qtype_order', 'subquestion', array($state->attempt, $state->question), $subquestion->id);
+                $subquestiontext = $this->format_text($text,
                         $question->questiontextformat, $cmoptions);
                 $subquestiontext = preg_replace('/\r\n/', ' ', $subquestiontext);
                 $subquestiontext = preg_replace('/"/', '\\"', $subquestiontext);
@@ -655,7 +658,6 @@ class question_order_qtype extends default_questiontype {
                 }
             }
         }
-
 
         // Restore defaultresponse option from state
         $defaultresponsechecked = '';
@@ -738,6 +740,21 @@ class question_order_qtype extends default_questiontype {
         return $result;
     }
 
+    function get_possible_responses(&$question) {
+        $answers = array();
+        if (is_array($question->options->subquestions)) {
+            foreach ($question->options->subquestions as $subqid => $answer) {
+                if ($answer->questiontext) {
+                    $r = new stdClass;
+                    $r->answer = $answer->questiontext . ": " . $answer->answertext;
+                    $r->credit = 1;
+                    $answers[$subqid] = array($answer->id =>$r);
+                }
+            }
+        }
+        return $answers;
+    }
+
     // ULPGC ecastro
     function get_actual_response($question, $state) {
        $subquestions = &$state->options->subquestions;
@@ -745,17 +762,119 @@ class question_order_qtype extends default_questiontype {
        $results = array();
        foreach ($subquestions as $key => $sub) {
            foreach ($responses as $ind => $code) {
-               if (isset($sub->options->answers[$code])) {
-                   $results[$ind] =  $subquestions[$ind]->questiontext . ": " . $sub->options->answers[$code]->answer;
+               if (isset($sub->options->answers[$ind])) {
+                   $results[$ind] =  $subquestions[$ind]->questiontext . ": " . $code;
                }
            }
        }
        return $results;
-   }
+    }
 
-    function response_summary($question, $state, $length=80) {
-        // This should almost certainly be overridden
-        return substr(implode(', ', $this->get_actual_response($question, $state)), 0, $length);
+    function get_actual_response_details($question, $state) {
+        $responses = $this->get_actual_response($question, $state);
+        $teacherresponses = $this->get_possible_responses($question, $state);
+        //only one response
+        $responsedetails = array();
+        foreach ($responses as $tsubqid => $response){
+            $responsedetail = new stdClass();
+            $responsedetail->subqid = $tsubqid;
+            $responsedetail->response = $response;
+            foreach ($teacherresponses[$tsubqid] as $aid => $tresponse){
+                if ($tresponse->answer == $response){
+                    $responsedetail->aid = $aid;
+                    break;
+                }
+            }
+            if (isset($responsedetail->aid)){
+                $responsedetail->credit = $teacherresponses[$tsubqid][$aid]->credit;
+            } else {
+                $responsedetail->aid = 0;
+                $responsedetail->credit = 0;
+            }
+            $responsedetails[] = $responsedetail;
+        }
+        return $responsedetails;
+    }
+
+    /**
+     * @param object $question
+     * @return mixed either a integer score out of 1 that the average random
+     * guess by a student might give or an empty string which means will not
+     * calculate.
+     */
+    function get_random_guess_score($question) {
+        $answers = array();
+        // Prepare a list of answers, removing duplicates.
+        foreach ($question->options->subquestions as $subquestion) {
+            $answertext = strip_tags(format_string($subquestion->answertext, false));
+            if (!in_array($answertext, $answers)) {
+                array_push($answers, $answertext);
+            }
+        }
+        return pow(1 / count($answers), count($question->options->subquestions));
+    }
+
+    /**
+     * Runs all the code required to set up and save an order question for testing purposes.
+     * Alternate DB table prefix may be used to facilitate data deletion.
+     */
+    function generate_test($name, $courseid = null) {
+        global $DB;
+        list($form, $question) = parent::generate_test($name, $courseid);
+        $form->horizontal = 0;
+        $form->noanswers = 3;
+        $form->subquestions = array('a', 'b', 'c');
+        $form->subanswers = array('1', '2', '3');
+
+        if ($courseid) {
+            $course = $DB->get_record('course', array('id' => $courseid));
+        }
+
+        return $this->save_question($question, $form);
+    }
+
+    function move_files($questionid, $oldcontextid, $newcontextid) {
+        global $DB;
+        $fs = get_file_storage();
+
+        parent::move_files($questionid, $oldcontextid, $newcontextid);
+
+        $subquestionids = $DB->get_records_menu('question_order_sub',
+                array('question' => $questionid), 'id', 'id,1');
+        foreach ($subquestionids as $subquestionid => $notused) {
+            $fs->move_area_files_to_new_context($oldcontextid,
+                    $newcontextid, 'qtype_order', 'subquestion', $subquestionid);
+        }
+    }
+
+    function delete_files($questionid, $contextid) {
+        global $DB;
+        $fs = get_file_storage();
+
+        parent::delete_files($questionid, $contextid);
+
+        $subquestionids = $DB->get_records_menu('question_order_sub',
+                array('question' => $questionid), 'id', 'id,1');
+        foreach ($subquestionids as $subquestionid => $notused) {
+            $fs->delete_area_files($contextid, 'qtype_order', 'subquestion', $subquestionid);
+        }
+    }
+
+    function check_file_access($question, $state, $options, $contextid, $component,
+            $filearea, $args) {
+
+        $itemid = reset($args);
+        if ($filearea == 'subquestion') {
+            // itemid is sub question id
+            if (!array_key_exists($itemid, $question->options->subquestions)) {
+                return false;
+            }
+
+            return true;
+        } else {
+            return parent::check_file_access($question, $state, $options, $contextid, $component,
+                    $filearea, $args);
+        }
     }
 
     /*
@@ -764,13 +883,14 @@ class question_order_qtype extends default_questiontype {
      * This is used in question/backuplib.php
      */
     function backup($bf, $preferences, $question, $level=6) {
+        global $DB;
 
         $status = true;
 
-        $order = get_record('question_order', 'question', $question);
+        $order = $DB->get_record('question_order', array('question', $question));
         $status = $status && fwrite($bf, full_tag("HORIZONTAL", 6, false, $order->horizontal));
 
-        $orders = get_records('question_order_sub', 'question', $question, 'id ASC');
+        $orders = $DB->get_records('question_order_sub', array('question' => $question, 'id ASC'));
         // If there are orders
         if ($orders) {
             $status = fwrite($bf, start_tag("ORDERS", 6, true));
@@ -795,6 +915,7 @@ class question_order_qtype extends default_questiontype {
      * This is used in question/restorelib.php
      */
     function restore($oldquestionid, $newquestionid, $info, $restore) {
+        global $DB;
 
         $status = true;
 
@@ -823,7 +944,7 @@ class question_order_qtype extends default_questiontype {
             $ordersub->answertext = backup_todb($orderinfo['#']['ANSWERTEXT']['0']['#']);
 
             // The structure is equal to the db, so insert the question_order_sub
-            $newid = insert_record("question_order_sub", $ordersub);
+            $newid = $DB->insert_record("question_order_sub", $ordersub);
 
             // Do some output
             if (($i+1) % 50 == 0) {
@@ -858,7 +979,7 @@ class question_order_qtype extends default_questiontype {
         $order->horizontal = $info['#']['HORIZONTAL']['0']['#'];
 
         // The structure is equal to the db, so insert the question_order_sub
-        $newid = insert_record("question_order", $order);
+        $newid = $DB->insert_record("question_order", $order);
 
         if (!$newid) {
             $status = false;
@@ -868,6 +989,7 @@ class question_order_qtype extends default_questiontype {
     }
 
     function restore_map($oldquestionid, $newquestionid, $info, $restore) {
+        global $DB;
 
         $status = true;
 
@@ -894,9 +1016,9 @@ class question_order_qtype extends default_questiontype {
             // mappings in backup_ids to use them later where restoring states (user level).
 
             // Get the order_sub from DB (by question, questiontext and answertext)
-            $dbordersub = get_record ("question_order_sub","question", $newquestionid,
-                                                      "questiontext", $ordersub->questiontext,
-                                                      "answertext", $ordersub->answertext);
+            $dbordersub = $DB->get_record("question_order_sub", array("question" => $newquestionid,
+                                                      "questiontext" => $ordersub->questiontext,
+                                                      "answertext" => $ordersub->answertext));
             print_r($dbordersub);
             // Do some output
             if (($i+1) % 50 == 0) {
@@ -926,17 +1048,18 @@ class question_order_qtype extends default_questiontype {
      * @return bool success or failure.
      */
     function decode_content_links_caller($questionids, $restore, &$i) {
+        global $DB;
         $status = true;
 
         // Decode links in the question_order_sub table.
-        if ($subquestions = get_records_list('question_order_sub', 'question',
+        if ($subquestions = $DB->get_records_list('question_order_sub', 'question',
                 implode(',',  $questionids), '', 'id, questiontext')) {
 
             foreach ($subquestions as $subquestion) {
                 $questiontext = restore_decode_content_links_worker($subquestion->questiontext, $restore);
                 if ($questiontext != $subquestion->questiontext) {
                     $subquestion->questiontext = addslashes($questiontext);
-                    if (!update_record('question_order_sub', $subquestion)) {
+                    if (!$DB->update_record('question_order_sub', $subquestion)) {
                         $status = false;
                     }
                 }
@@ -979,7 +1102,22 @@ class question_order_qtype extends default_questiontype {
 
             // run through subquestions
             foreach ($subquestions as $subquestion) {
-                $question->subquestions[] = $format->getpath($subquestion, array('#','text',0,'#'), '', true);
+                $qo = array();
+                $qo['text'] = $format->getpath($subquestion, array('#', 'text', 0, '#'), '', true);
+                $qo['format'] = $format->trans_format(
+                        $format->getpath($subquestion, array('@', 'format'), 'moodle_auto_format'));
+                $qo['files'] = array();
+
+                $files = $format->getpath($subquestion, array('#', 'file'), array());
+                foreach ($files as $file) {
+                    $data = new stdclass();
+                    $data->content = $file['#'];
+                    $data->encoding = $file['@']['encoding'];
+                    $data->name = $file['@']['name'];
+                    $qo['files'][] = $data;
+                }
+                $question->subquestions[] = $qo;
+                $answers = $format->getpath($subquestion, array('#', 'answer'), array());
                 $question->subanswers[] = $format->getpath($subquestion, array('#','answer',0,'#','text',0,'#'), '', true);
             }
 
@@ -999,14 +1137,19 @@ class question_order_qtype extends default_questiontype {
         return false;
     }
 
-    function export_to_xml($question, $format, $extra=null) {
+    function export_to_xml($question, $format, $extra) {
         $expout = '';
+        $fs = get_file_storage();
+        $contextid = $question->contextid;
 
         foreach ($question->options->subquestions as $subquestion) {
-            $expout .= " <subquestion>\n";
-            $expout .= $format->writetext($subquestion->questiontext, 2);
+            $files = $fs->get_area_files($contextid, 'qtype_order', 'subquestion', $subquestion->id);
+            $textformat = $format->get_format($subquestion->questiontextformat);
+            $expout .= " <subquestion format=\"$textformat\">\n";
+            $expout .= $format->writetext($subquestion->questiontext);
+            $expout .= $format->writefiles($files);
             $expout .= "   <answer>\n";
-            $expout .= $format->writetext($subquestion->answertext, 4);
+            $expout .= $format->writetext($subquestion->answertext);
             $expout .= "   </answer>\n";
             $expout .= " </subquestion>\n";
         }
