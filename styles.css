@@ -37,11 +37,13 @@ ul.deactivateddraglist li {
 
 
 ul.inline li, ul.inline p {
-    display: inline;
-    line-height: 5ex;
+    float:left;
 }
 
 ul.readonly li {
     cursor: default;
 }
 
+.order .ablock {
+    width: 80%;
+}

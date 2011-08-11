@@ -94,6 +94,8 @@ YAHOO.extend(MoodleDDListItem, YAHOO.util.DDProxy, {
                 Dom.setStyle(thisid, "visibility", "");
             });
         a.animate();
+        
+        M.order.SetHiddens(thisid);
     },
 
     onDrag: function(e) {
@@ -145,11 +147,43 @@ YAHOO.extend(MoodleDDListItem, YAHOO.util.DDProxy, {
 
 })();
 
+M.order = {}
+
 // Initialize the list items as dragdrop items
-function ddOrderingInit(liids, name) {
-    for (lielem in liids) {
-        // create draggable item
-        new MoodleDDListItem(liids[lielem], name);
+M.order.Init = function(vars) {
+    var Dom = YAHOO.util.Dom;
+    var ablock = Dom.get("ablock_" + vars.qid);
+    ablock.innerHTML = vars.ablockcontent;
+
+    if (vars.readonly) return;
+
+    for (i = 0; i < vars.stemscount; i = i + 1) {
+        new MoodleDDListItem('li_' + vars.qid + '_' + i, vars.qid);
+    }
+}
+
+M.order.SetHiddens = function(liid) {
+    var Dom = YAHOO.util.Dom;
+    var items = Dom.get(liid).parentNode.getElementsByTagName("li");
+    
+    for (i = 0; i < items.length; i = i + 1) {
+        inputhidden = Dom.get(items[i].getAttribute("name"));
+        inputhidden.value = i + 1;
+    }
+}
+
+M.order.OnClickDontKnow = function(qid) {
+    var Dom = YAHOO.util.Dom;
+    var ch = Dom.get('ch_' + qid);
+    var ul = Dom.get('ul_' + qid);
+    
+    if (ch.checked) {
+        Dom.addClass(ul, "deactivateddraglist");
+        Dom.removeClass(ul, "draglist");
+    }
+    else {
+        Dom.addClass(ul, "draglist");
+        Dom.removeClass(ul, "deactivateddraglist");
     }
 }
 

@@ -12,16 +12,18 @@
 /**
  * match editing form definition.
  */
-class question_edit_order_form extends question_edit_form {
+class qtype_order_edit_form extends question_edit_form {
 
     function get_per_answer_fields(&$mform, $label, $gradeoptions, &$repeatedoptions, &$answersoption) {
         $repeated = array();
         $repeated[] =& $mform->createElement('header', 'answerhdr', $label);
-        $repeated[] =& $mform->createElement('editor', 'subquestions', get_string('question', 'quiz'), null, $this->editoroptions);
+        $repeated[] =& $mform->createElement('editor', 'subquestions',
+                get_string('question'), null, $this->editoroptions);
         $repeated[] =& $mform->createElement('hidden', 'subanswers', '0', null);
         $repeatedoptions['subquestions']['type'] = PARAM_RAW;
         $repeatedoptions['subanswers']['type'] = PARAM_TEXT;
         $answersoption = 'subquestions';
+        
         return $repeated;
     }
 
@@ -34,63 +36,68 @@ class question_edit_order_form extends question_edit_form {
         $mform->addElement('advcheckbox', 'horizontal', get_string('horizontal', 'qtype_order'), null, null, array(0,1));
         $mform->setDefault('horizontal', 0);
 
-        $mform->addElement('static', 'answersinstruct', get_string('choices', 'quiz'), get_string('filloutthreeitems', 'qtype_order'));
+        $mform->addElement('static', 'answersinstruct',
+                get_string('availablechoices', 'qtype_match'),
+                get_string('filloutthreeitems', 'qtype_order'));
         $mform->closeHeaderBefore('answersinstruct');
 
-        $this->add_per_answer_fields($mform, get_string('questionno', 'quiz', '{no}'), 0);
+        $this->add_per_answer_fields($mform, get_string('questionno', 'question', '{no}'), 0);
+
+        $this->add_combined_feedback_fields(true);
+        $this->add_interactive_settings(true, true);
     }
 
     function data_preprocessing($question) {
-        if (isset($question->options)) {
-            $subquestions = $question->options->subquestions;
-            if (count($subquestions)) {
-                $key = 0;
-                foreach ($subquestions as $subquestion){
-                    $default_values['subanswers['.$key.']'] = $subquestion->answertext;
+        $question = parent::data_preprocessing($question);
+        $question = $this->data_preprocessing_combined_feedback($question, true);
+        $question = $this->data_preprocessing_hints($question, true, true);
 
-                    $draftid = file_get_submitted_draft_itemid('subquestions['.$key.']');
-                    $default_values['subquestions['.$key.']'] = array();
-                    $default_values['subquestions['.$key.']']['format'] = $subquestion->questiontextformat;
-                    $default_values['subquestions['.$key.']']['text'] = file_prepare_draft_area(
-                        $draftid, // draftid
-                        $this->context->id, // context
-                        'qtype_order', // component
-                        'subquestion', // filarea
-                        !empty($subquestion->id)?(int)$subquestion->id:null, // itemid
-                        $this->fileoptions, // options
-                        $subquestion->questiontext // text
-                    );
-                    $default_values['subquestions['.$key.']']['itemid'] = $draftid;
-
-                    $key++;
-                }
-            }
-            $default_values['horizontal'] =  $question->options->horizontal;
-            $question = (object)((array)$question + $default_values);
+        if (empty($question->options)) {
+            return $question;
         }
+
+        $question->horizontal = $question->options->horizontal;
+
+        $key = 0;
+        foreach ($question->options->subquestions as $subquestion) {
+            $question->subanswers[$key] = $subquestion->answertext;
+
+            $draftid = file_get_submitted_draft_itemid('subquestions[' . $key . ']');
+            $question->subquestions[$key] = array();
+            $question->subquestions[$key]['text'] = file_prepare_draft_area(
+                $draftid,           // draftid
+                $this->context->id, // context
+                'qtype_order',      // component
+                'subquestion',      // filarea
+                !empty($subquestion->id) ? (int) $subquestion->id : null, // itemid
+                $this->fileoptions, // options
+                $subquestion->questiontext // text
+            );
+            $question->subquestions[$key]['format'] = $subquestion->questiontextformat;
+            $question->subquestions[$key]['itemid'] = $draftid;
+            
+            $key++;
+        }
+
         return $question;
     }
 
-    function qtype() {
-        return 'order';
-    }
-
-    function validation($data, $files) {
+    public function validation($data, $files) {
         $errors = parent::validation($data, $files);
         $answers = $data['subanswers'];
         $questions = $data['subquestions'];
         $questioncount = 0;
         $answercount = 0;
-        foreach ($questions as $key => $question){
+        foreach ($questions as $key => $question) {
             $trimmedquestion = trim($question['text']);
             $trimmedanswer = trim($answers[$key]);
-            if ($trimmedquestion != ''){
+            if ($trimmedquestion != '') {
                 $questioncount++;
             }
-            if ($trimmedanswer != '' || $trimmedquestion != ''){
+            if ($trimmedanswer != '' || $trimmedquestion != '') {
                 $answercount++;
             }
-            if ($trimmedquestion != '' && $trimmedanswer == ''){
+            if ($trimmedquestion != '' && $trimmedanswer == '') {
                 $errors['subanswers['.$key.']'] = get_string('nomatchinganswerforq', 'qtype_match', $trimmedquestion);
             }
         }
@@ -106,5 +113,9 @@ class question_edit_order_form extends question_edit_form {
             $errors['subquestions[2]'] = get_string('notenoughqsandas', 'qtype_match', $numberqanda);
         }
         return $errors;
+    }
+
+    public function qtype() {
+        return 'order';
     }
 }
