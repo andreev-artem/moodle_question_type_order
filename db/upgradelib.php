@@ -28,31 +28,38 @@ class qtype_order_qe2_attempt_updater extends question_qtype_attempt_updater {
     protected $right;
     protected $stemorder;
     protected $choiceorder;
+    protected $code2subid;
     protected $flippedchoiceorder;
 
+    /**
+     * This value gets stored in the question_attempts.questionsummary column.
+     * @return string
+     */
     public function question_summary() {
         $this->stems = array();
         $this->choices = array();
         $this->right = array();
-
+        $this->code2subid = array();
         foreach ($this->question->options->subquestions as $matchsub) {
-            $ans = $matchsub->answertext;
-            $key = array_search($matchsub->answertext, $this->choices);
-            if ($key === false) {
-                $key = $matchsub->id;
-                $this->choices[$key] = $matchsub->answertext;
-            }
+            $key = $matchsub->id;
+            $this->choices[$key] = $matchsub->answertext;
 
             if ($matchsub->questiontext !== '') {
-                $this->stems[$matchsub->id] = $this->to_text($matchsub->questiontext);
-                $this->right[$matchsub->id] = $key;
+                $this->stems[$key] = $this->to_text($matchsub->questiontext);
+                $this->right[$key] = $key;
             }
-        }
 
-        return $this->to_text($this->question->questiontext) . ' {' .
-                implode('; ', $this->stems) . '} -> {' . implode('; ', $this->choices) . '}';
+            $this->code2subid[$matchsub->code] = $matchsub->id;
+        }
+        $summary = $this->to_text($this->question->questiontext) . ' {' .
+            implode('; ', $this->stems) . '} -> {' . implode('; ', $this->choices) . '}';
+        return $summary;
     }
 
+    /**
+     * This value gets stored in the question_attempts.rightanswer column.
+     * @return string
+     */
     public function right_answer() {
         $answer = array();
         foreach ($this->stems as $key => $stem) {
@@ -61,6 +68,10 @@ class qtype_order_qe2_attempt_updater extends question_qtype_attempt_updater {
         return $this->make_summary($answer);
     }
 
+    /**
+     * @param $answer
+     * @return array (subquestionid => choice position, ..., subquestionid => choice position) (subquestionid a.k.a stemid)
+     */
     protected function explode_answer($answer) {
         if (!$answer) {
             return array();
@@ -68,8 +79,15 @@ class qtype_order_qe2_attempt_updater extends question_qtype_attempt_updater {
         $bits = explode(',', $answer);
         $selections = array();
         foreach ($bits as $bit) {
-            list($stem, $choice) = explode('-', $bit);
-            $selections[$stem] = $choice;
+            $data = explode('-', $bit);
+
+           // ignore the "no" or "yes" piece
+            if (count($data) == 2) {
+                list($stem, $choice) = $data;
+                if (isset($this->code2subid[$stem])) {
+                    $selections[$this->code2subid[$stem]] = $choice;
+                }
+            }
         }
         return $selections;
     }
@@ -95,6 +113,10 @@ class qtype_order_qe2_attempt_updater extends question_qtype_attempt_updater {
         return null;
     }
 
+    /**
+     * This value gets stored in the question_attempts.responsesummary column.
+     * @return string
+     */
     public function response_summary($state) {
         $choices = $this->explode_answer($state->answer);
         if (empty($choices)) {
@@ -103,16 +125,8 @@ class qtype_order_qe2_attempt_updater extends question_qtype_attempt_updater {
 
         $pairs = array();
         foreach ($choices as $stemid => $choicekey) {
-            if (array_key_exists($stemid, $this->stems) && $choices[$stemid]) {
-                $choiceid = $this->lookup_choice($choicekey);
-                if ($choiceid) {
-                    $pairs[$this->stems[$stemid]] = $this->choices[$choiceid];
-                } else {
-                    $this->logger->log_assumption("Dealing with a place where the
-                            student selected a choice that was later deleted for
-                            match question {$this->question->id}");
-                    $pairs[$this->stems[$stemid]] = '[CHOICE THAT WAS LATER DELETED]';
-                }
+            if ($choicekey && array_key_exists($stemid, $this->stems)) {
+                $pairs[$this->stems[$stemid]] = $choicekey;
             }
         }
 
@@ -133,42 +147,47 @@ class qtype_order_qe2_attempt_updater extends question_qtype_attempt_updater {
         return false;
     }
 
-    public function set_first_step_data_elements($state, &$data) {
-        $choices = $this->explode_answer($state->answer);
-        foreach ($choices as $key => $notused) {
-            if (array_key_exists($key, $this->stems)) {
-                $this->stemorder[] = $key;
+    public function get_stemorder($answer) {
+        if (null === $this->stemorder && $answer) {
+            $bits = explode(',', $answer);
+            foreach ($bits as $bit) {
+                //todo: fix this, not always two pieces here
+                $data = explode('-', $bit);
+                if (count($data) == 2) {
+                    $stem = $data[0];
+                    $this->stemorder[] = $this->code2subid[$stem];
+                }
             }
         }
+        return $this->stemorder;
+    }
 
+    public function set_first_step_data_elements($state, &$data) {
         $this->choiceorder = array_keys($this->choices);
-        shuffle($this->choiceorder);
-        $this->flippedchoiceorder = array_combine(
-                array_values($this->choiceorder), array_keys($this->choiceorder));
-
-        $data['_stemorder'] = implode(',', $this->stemorder);
-        $data['_choiceorder'] = implode(',', $this->choiceorder);
+        $answertexts = array_flip($this->choices);
+        ksort($answertexts);
+        $choiceorder = array_values($answertexts);  // gets the subquestion ids in the order defined by the answertext field
+        $data['_stemorder'] = implode(',', $this->get_stemorder($state->answer));
+        $data['_choiceorder'] = implode(',', $choiceorder);
     }
 
     public function supply_missing_first_step_data(&$data) {
         throw new coding_exception('qtype_order_updater::supply_missing_first_step_data ' .
                 'not tested');
         $data['_stemorder'] = array_keys($this->stems);
-        $data['_choiceorder'] = shuffle(array_keys($this->choices));
+        $data['_choiceorder'] = array_keys($this->choices);
     }
 
     public function set_data_elements_for_step($state, &$data) {
         $choices = $this->explode_answer($state->answer);
-
-        foreach ($this->stemorder as $i => $key) {
+        $stemorder = $this->get_stemorder($state->answer);
+        foreach ($stemorder as $i => $key) {
             if (empty($choices[$key])) {
                 $data['sub' . $i] = 0;
                 continue;
             }
-            $choice = $this->lookup_choice($choices[$key]);
-
-            if (array_key_exists($choice, $this->flippedchoiceorder)) {
-                $data['sub' . $i] = $this->flippedchoiceorder[$choice] + 1;
+            if (array_key_exists($key, $choices)) {
+                $data['sub' . $i] = $choices[$key];
             } else {
                 $data['sub' . $i] = 0;
             }
