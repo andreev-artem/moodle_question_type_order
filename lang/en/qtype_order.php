@@ -19,6 +19,7 @@ $string['notenoughquestions'] = 'You must provide at least three items.';
 $string['order'] = 'Ordering';
 $string['order_help'] = 'This is a drag-and-drop question where items can be reordered either vertically or horizontally.';
 $string['order_link'] = 'question/type/order';
-$string['ordersummary'] = 'A drag-and-drop question where items can be reordered either vertically or horizontally.'
+$string['ordersummary'] = 'A drag-and-drop question where items can be reordered either vertically or horizontally.';
+$string['pluginname'] = 'Drag-and-Drop Ordering Question';
 
 ?>
