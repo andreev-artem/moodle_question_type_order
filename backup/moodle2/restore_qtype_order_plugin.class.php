@@ -71,13 +71,13 @@ class restore_qtype_order_plugin extends restore_qtype_plugin {
             // Keep question_order->subquestions unmodified
             // after_execute_question() will perform the remapping once all subquestions
             // have been created
-			
+
 			//Added by justin hunt 20120131, previously errors occured here cos no default value for these fields in DB
 			//yet since these members are new in 2.x, the 1.9 backups didn't contain them
 			if(!isset($data->correctfeedback)){ $data->correctfeedback =" ";}
 			if(!isset($data->partiallycorrectfeedback)){ $data->partiallycorrectfeedback =" ";}
 			if(!isset($data->incorrectfeedback)){ $data->incorrectfeedback =" ";}
-			
+
             // Insert record
             $newitemid = $DB->insert_record('question_order', $data);
             // Create mapping
@@ -197,5 +197,30 @@ class restore_qtype_order_plugin extends restore_qtype_plugin {
         $contents[] = new restore_decode_content('question_order_sub', array('questiontext'), 'question_order_sub');
 
         return $contents;
+    }
+
+    public function recode_response($questionid, $sequencenumber, array $response) {
+        if (array_key_exists('_choiceorder', $response)) {
+            $response['_choiceorder'] = $this->recode_order($response['_choiceorder']);
+        }
+        if (array_key_exists('_stemorder', $response)) {
+            $response['_stemorder'] = $this->recode_order($response['_stemorder']);
+        }
+        return $response;
+    }
+
+    /**
+     * Recode the choice and/or stem order as stored in the response.
+     * @param string $order the original order.
+     * @return string the recoded order.
+     */
+    protected function recode_order($order) {
+        $neworder = array();
+        foreach (explode(',', $order) as $id) {
+            if (($newid = $this->get_mappingid('question_order_sub', $id))) {
+                $neworder[] = $newid;
+            }
+        }
+        return implode(',', $neworder);
     }
 }
