@@ -204,11 +204,97 @@ class qtype_order extends question_type {
             $fs->delete_area_files($contextid, 'qtype_order', 'subquestion', $subquestionid);
         }
 
-        $fs->delete_area_files($contextid, 'qtype_multichoice',
+        $fs->delete_area_files($contextid, 'qtype_order',
                 'correctfeedback', $questionid);
-        $fs->delete_area_files($contextid, 'qtype_multichoice',
+        $fs->delete_area_files($contextid, 'qtype_order',
                 'partiallycorrectfeedback', $questionid);
-        $fs->delete_area_files($contextid, 'qtype_multichoice',
+        $fs->delete_area_files($contextid, 'qtype_order',
                 'incorrectfeedback', $questionid);
     }
+	
+/// IMPORT EXPORT FUNCTIONS ////////////////////////////
+ 
+    /**
+     ** Provide export functionality for xml format
+     ** @param question object the question object
+     ** @param format object the format object so that helper methods can be used 
+     ** @param extra mixed any additional format specific data that may be passed by the format (see format code for info)
+     ** @return string the data to append to the output buffer or false if error
+     **/
+    public function export_to_xml($question, qformat_xml $format, $extra=null) {
+        $expout = '';
+        $fs = get_file_storage();
+        $contextid = $question->contextid;
+        $expout .= "    <horizontal>" . $question->options->horizontal .
+                        "</horizontal>\n";
+		$expout .= $format->write_combined_feedback($question->options,
+                                                    $question->id,
+                                                    $question->contextid);
+        foreach($question->options->subquestions as $subquestion) {
+            $files = $fs->get_area_files($contextid, 'qtype_order', 'subquestion', $subquestion->id);
+            $textformat = $format->get_format($subquestion->questiontextformat);
+            $expout .= "    <subquestion format=\"$textformat\">\n";
+            $expout .= $format->writetext( $subquestion->questiontext, 3);
+            $expout .= $format->write_files($files);
+            $expout .= "      <answer>\n";
+			$expout .= $format->writetext( $subquestion->answertext, 4);
+			$expout .= "      </answer>\n";
+            $expout .= "    </subquestion>\n";
+        }
+
+        return $expout;
+    }
+
+   /**
+    ** Provide import functionality for xml format
+    ** @param data mixed the segment of data containing the question
+    ** @param question object question object processed (so far) by standard import code
+    ** @param format object the format object so that helper methods can be used (in particular error() )
+    ** @param extra mixed any additional format specific data that may be passed by the format (see format code for info)
+    ** @return object question object suitable for save_options() call or false if cannot handle
+    **/
+    public function import_from_xml($data, $question, qformat_xml $format, $extra=null) {
+       // check question is for us
+       $qtype = $data['@']['type'];
+       if ($qtype=='order') {
+           $question = $format->import_headers( $data );
+
+            // header parts particular to matching
+            $question->qtype = $qtype;
+            $question->shuffleanswers = 1;
+            $question->horizontal = $format->getpath( $data, array( '#','horizontal',0,'#' ), 1 );
+
+            // get subquestions
+            $subquestions = $data['#']['subquestion'];
+            $question->subquestions = array();
+            $question->subanswers = array();
+
+            // run through subquestions
+            foreach ($subquestions as $subquestion) {
+                $qo = array();
+                $qo['text'] = $format->getpath($subquestion, array('#', 'text', 0, '#'), '', true);
+                $qo['format'] = $format->trans_format(
+                        $format->getpath($subquestion, array('@', 'format'), 'html'));
+                $qo['files'] = array();
+
+                $files = $format->getpath($subquestion, array('#', 'file'), array());
+                foreach ($files as $file) {
+                    $record = new stdclass();
+                    $record->content = $file['#'];
+                    $record->encoding = $file['@']['encoding'];
+                    $record->name = $file['@']['name'];
+                    $qo['files'][] = $record;
+                }
+                $question->subquestions[] = $qo;
+				$ans = $format->getpath($subquestion, array('#', 'answer', 0), array());
+                $question->subanswers[] = $ans;
+            }
+			$format->import_combined_feedback($question, $data, true);
+			$format->import_hints($question, $data, true);
+            return $question;
+       }
+       else {
+           return false;
+       }
+    } 
 }

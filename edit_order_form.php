@@ -14,12 +14,12 @@
  */
 class qtype_order_edit_form extends question_edit_form {
 
-    function get_per_answer_fields(&$mform, $label, $gradeoptions, &$repeatedoptions, &$answersoption) {
+    function get_per_answer_fields($mform, $label, $gradeoptions, &$repeatedoptions, &$answersoption) {
         $repeated = array();
-        $repeated[] =& $mform->createElement('header', 'answerhdr', $label);
-        $repeated[] =& $mform->createElement('editor', 'subquestions',
+        $repeated[] = $mform->createElement('header', 'answerhdr', $label);
+        $repeated[] = $mform->createElement('editor', 'subquestions',
                 get_string('question'), null, $this->editoroptions);
-        $repeated[] =& $mform->createElement('hidden', 'subanswers', '0', null);
+        $repeated[] = $mform->createElement('hidden', 'subanswers', '0', null);
         $repeatedoptions['subquestions']['type'] = PARAM_RAW;
         $repeatedoptions['subanswers']['type'] = PARAM_TEXT;
         $answersoption = 'subquestions';
@@ -32,7 +32,7 @@ class qtype_order_edit_form extends question_edit_form {
      *
      * @param object $mform the form being built.
      */
-    function definition_inner(&$mform) {
+    function definition_inner($mform) {
         $mform->addElement('advcheckbox', 'horizontal', get_string('horizontal', 'qtype_order'), null, null, array(0,1));
         $mform->setDefault('horizontal', 0);
 
