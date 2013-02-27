@@ -35,20 +35,6 @@ class qtype_order_renderer extends qtype_with_combined_feedback_renderer {
         return true;
     }
 
-    public function head_code(question_attempt $qa) {
-        global $PAGE;
-
-        if ($this->can_use_drag_and_drop()) {
-            $PAGE->requires->js('/question/type/order/order.js');
-
-            $PAGE->requires->yui2_lib('yahoo');
-            $PAGE->requires->yui2_lib('event');
-            $PAGE->requires->yui2_lib('dom');
-            $PAGE->requires->yui2_lib('dragdrop');
-            $PAGE->requires->yui2_lib('animation');
-        }
-    }
-
     public function formulation_and_controls(question_attempt $qa,
             question_display_options $options) {
 
@@ -76,11 +62,15 @@ class qtype_order_renderer extends qtype_with_combined_feedback_renderer {
             $initparams->stemscount = count($question->get_stem_order());
             $initparams->ablockcontent = $this->construct_ablock_dragable($qa, $options);
             $initparams->readonly = $options->readonly;
-            
-            $initparams = json_encode($initparams);
-            $js = "YAHOO.util.Event.onDOMReady(function(){M.order.Init($initparams);});";
 
-            $o .= html_writer::script($js);
+            global $PAGE;
+            $PAGE->requires->js_init_call('M.order.Init',
+                                          array($initparams),
+                                          FALSE,
+                                          array('name' => 'order',
+                                                'fullpath' => '/question/type/order/order.js',
+                                                'requires' => array('yui2-yahoo', 'yui2-event', 'yui2-dom', 'yui2-dragdrop', 'yui2-animation')));
+
         }
         
         return $o;

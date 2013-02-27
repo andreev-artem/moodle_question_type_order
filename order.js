@@ -34,11 +34,12 @@ POSSIBILITY OF SUCH DAMAGE.
 
 (function() {
 
-var Dom = YAHOO.util.Dom;
-var Event = YAHOO.util.Event;
-var DDM = YAHOO.util.DragDropMgr;
+var YAHOO;
+var Dom;
+var Event;
+var DDM;
 
-MoodleDDListItem = function(id, sGroup, config) {
+var MoodleDDListItem = function(id, sGroup, config) {
 
     MoodleDDListItem.superclass.constructor.call(this, id, sGroup, config);
 
@@ -51,7 +52,7 @@ MoodleDDListItem = function(id, sGroup, config) {
     this.lastY = 0;
 };
 
-YAHOO.extend(MoodleDDListItem, YAHOO.util.DDProxy, {
+var MoodleDDListItem_extend = {
 
     startDrag: function(x, y) {
 
@@ -143,15 +144,22 @@ YAHOO.extend(MoodleDDListItem, YAHOO.util.DDProxy, {
             DDM.refreshCache();
         }
     }
-});
+};
 
-})();
+function initModuleGlobals(Y) {
+    YAHOO = Y.YUI2;
+    Dom = YAHOO.util.Dom;
+    Event = YAHOO.util.Event;
+    DDM = YAHOO.util.DragDropMgr;
+    YAHOO.extend(MoodleDDListItem, YAHOO.util.DDProxy, MoodleDDListItem_extend);
+};
 
 M.order = {}
 
 // Initialize the list items as dragdrop items
-M.order.Init = function(vars) {
-    var Dom = YAHOO.util.Dom;
+M.order.Init = function(Y, vars) {
+    initModuleGlobals(Y);
+
     var ablock = Dom.get("ablock_" + vars.qid);
     ablock.innerHTML = vars.ablockcontent;
 
@@ -262,3 +270,7 @@ function createElementWithNameandType(type, name, typeattr) {
 
     return element;
 }
+
+
+
+})();
